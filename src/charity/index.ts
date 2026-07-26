@@ -169,22 +169,25 @@ async function main() {
       }
     }
 
-    // 2. Forward everything owed once (and only once) an allocation is chosen.
-    //    Owed = collected − already forwarded; the dev splits it across causes by %.
+    // 2. Forward everything once (and only once) an allocation is chosen.
+    //    WETH is DB-attributed (claims can belong to different tokens sharing one WETH
+    //    balance). The TOKEN side is BALANCE-based: forward everything the wallet holds
+    //    of this token — claimed fees AND supply sent to the charity wallet out-of-band
+    //    (e.g. a dev donating bought-back supply directly).
     const alloc = selections.get(token.toLowerCase());
     const owedWeth = db.sumCollectedWeth(token) - db.sumDonatedWeth(token);
-    const owedTok = db.sumCollectedToken(token) - db.sumTokenSent(token);
+    const tokBal = await balanceOf(pc, token, me).catch(() => 0n);
     if (!alloc) {
-      if (owedWeth > 0n || owedTok > 0n)
-        log.info(`${token}: holding ${eth(owedWeth)} + ${owedTok} tok — awaiting the dev's allocation`);
+      if (owedWeth > 0n || tokBal > 0n)
+        log.info(`${token}: holding ${eth(owedWeth)} + ${tokBal} tok — awaiting the dev's allocation`);
       return;
     }
     if (cfg.dryRun) {
-      if (owedWeth > 0n || owedTok > 0n)
-        log.info(`${token}: [dry-run] would donate ${eth(owedWeth)} + ${owedTok} tok split ${alloc.map((a) => `${a.pct}% ${a.id}`).join(", ")}`);
+      if (owedWeth > 0n || tokBal > 0n)
+        log.info(`${token}: [dry-run] would donate ${eth(owedWeth)} + ${tokBal} tok split ${alloc.map((a) => `${a.pct}% ${a.id}`).join(", ")}`);
       return;
     }
-    if (owedWeth <= 0n && owedTok <= 0n) return;
+    if (owedWeth <= 0n && tokBal <= 0n) return;
 
     const sym = await symOf(token);
     const dec = Number((await pc.readContract({ address: token, abi: erc20Abi, functionName: "decimals" }).catch(() => 18)) as number);
@@ -205,11 +208,7 @@ async function main() {
         wAmt = 0n;
       }
     }
-    let tAmt = 0n;
-    if (owedTok > 0n) {
-      const tbal = await balanceOf(pc, token, me).catch(() => 0n);
-      tAmt = owedTok <= tbal ? owedTok : tbal;
-    }
+    const tAmt = tokBal;
     if (wAmt <= 0n && tAmt <= 0n) return;
 
     // Per-org shares: floor by pct, the last org absorbs rounding dust.
