@@ -68,8 +68,9 @@ async function main() {
 
   process.on("SIGINT", () => { log.info("shutting down"); process.exit(0); });
 
-  // token(lower) -> orgId, from on-chain memos; deployer-verified, latest wins
-  const selections = new Map<string, string>();
+  // token(lower) -> percentage allocation across causes, from on-chain memos;
+  // deployer-verified, latest memo wins. Memo: PONS|<token>|stjude:40,givewell:60 (pcts sum to 100)
+  const selections = new Map<string, { id: string; pct: number }[]>();
   const deployerCache = new Map<string, string>();
   const symCache = new Map<string, string>();
 
@@ -98,18 +99,28 @@ async function main() {
         if (t.isError === "1" || !t.input || t.input === "0x") continue;
         let txt = "";
         try { txt = Buffer.from(t.input.slice(2), "hex").toString("utf8"); } catch { continue; }
-        const m = txt.match(/^PONS\|([a-z]+)\|(0x[0-9a-fA-F]{40})$/);
+        const m = txt.match(/^PONS\|(0x[0-9a-fA-F]{40})\|([a-z]+:\d+(?:,[a-z]+:\d+)*)$/);
         if (!m) continue;
-        const orgId = m[1] ?? "";
-        const tokenRaw = m[2] ?? "";
-        const org = CHARITIES[orgId];
-        if (!org || !tokenRaw) continue;
+        const tokenRaw = m[1] ?? "";
+        const allocRaw = m[2] ?? "";
+        if (!tokenRaw || !allocRaw) continue;
+        const parts = allocRaw.split(",").map((p) => {
+          const [id, pctS] = p.split(":");
+          return { id: id ?? "", pct: Number(pctS ?? "0") };
+        });
+        const valid =
+          parts.length > 0 &&
+          parts.every((p) => CHARITIES[p.id] && Number.isInteger(p.pct) && p.pct > 0) &&
+          parts.reduce((a, b) => a + b.pct, 0) === 100 &&
+          new Set(parts.map((p) => p.id)).size === parts.length;
+        if (!valid) continue;
         const token = getAddress(tokenRaw as Address);
         const dep = await deployerOf(token);
         if (!dep || dep !== t.from.toLowerCase()) { log.warn(`memo ignored: ${t.from} is not deployer of ${token}`); continue; }
-        const prev = selections.get(token.toLowerCase());
-        selections.set(token.toLowerCase(), orgId); // asc order → latest memo wins
-        if (prev !== orgId) log.info(`cause set: ${token} → ${org.name} (by deployer ${t.from})`);
+        const prev = JSON.stringify(selections.get(token.toLowerCase()) ?? null);
+        selections.set(token.toLowerCase(), parts); // asc order → latest memo wins
+        if (prev !== JSON.stringify(parts))
+          log.info(`allocation set: ${token} → ${parts.map((p) => `${p.pct}% ${CHARITIES[p.id]!.name}`).join(", ")} (by deployer ${t.from})`);
       }
     } catch (e) {
       log.warn(`selection refresh failed: ${(e as Error).message.split("\n")[0]}`);
@@ -158,67 +169,90 @@ async function main() {
       }
     }
 
-    // 2. Forward everything owed once (and only once) a cause is chosen.
-    const sel = selections.get(token.toLowerCase());
+    // 2. Forward everything owed once (and only once) an allocation is chosen.
+    //    Owed = collected − already forwarded; the dev splits it across causes by %.
+    const alloc = selections.get(token.toLowerCase());
     const owedWeth = db.sumCollectedWeth(token) - db.sumDonatedWeth(token);
     const owedTok = db.sumCollectedToken(token) - db.sumTokenSent(token);
-    if (!sel) {
+    if (!alloc) {
       if (owedWeth > 0n || owedTok > 0n)
-        log.info(`${token}: holding ${eth(owedWeth)} + ${owedTok} tok — awaiting the dev's cause choice`);
+        log.info(`${token}: holding ${eth(owedWeth)} + ${owedTok} tok — awaiting the dev's allocation`);
       return;
     }
-    const org = CHARITIES[sel]!;
     if (cfg.dryRun) {
-      if (owedWeth > 0n || owedTok > 0n) log.info(`${token}: [dry-run] would donate ${eth(owedWeth)} + ${owedTok} tok to ${org.name}`);
+      if (owedWeth > 0n || owedTok > 0n)
+        log.info(`${token}: [dry-run] would donate ${eth(owedWeth)} + ${owedTok} tok split ${alloc.map((a) => `${a.pct}% ${a.id}`).join(", ")}`);
       return;
     }
+    if (owedWeth <= 0n && owedTok <= 0n) return;
 
-    let donateTx: string | null = null;
-    let donatedWeth = 0n;
+    const sym = await symOf(token);
+    const dec = Number((await pc.readContract({ address: token, abi: erc20Abi, functionName: "decimals" }).catch(() => 18)) as number);
+
+    // Cap at real balances (never touch gas), unwrap the WETH part once up-front.
+    let wAmt = 0n;
     if (owedWeth > 0n) {
       try {
         const wbal = (await pc.readContract({ address: weth, abi: erc20Abi, functionName: "balanceOf", args: [me] })) as bigint;
-        const amt = owedWeth <= wbal ? owedWeth : wbal;   // cap at actual balance, never touch gas
-        if (amt > 0n) {
-          const { request } = await pc.simulateContract({ account, address: weth, abi: wethAbi, functionName: "withdraw", args: [amt] });
+        wAmt = owedWeth <= wbal ? owedWeth : wbal;
+        if (wAmt > 0n) {
+          const { request } = await pc.simulateContract({ account, address: weth, abi: wethAbi, functionName: "withdraw", args: [wAmt] });
           const uh = await wc.writeContract(request);
           await pc.waitForTransactionReceipt({ hash: uh });
-          donateTx = await wc.sendTransaction({ account, chain: wc.chain, to: org.address, value: amt });
-          await pc.waitForTransactionReceipt({ hash: donateTx as `0x${string}` });
-          donatedWeth = amt;
-          db.recordDistribution(token, org.address, amt, donateTx);
-          log.info(`${token}: donated ${eth(amt)} → ${org.name} (${org.address}) — tx ${donateTx}`);
         }
       } catch (e) {
-        log.error(`${token}: donation failed: ${(e as Error).message.split("\n")[0]}`);
+        log.error(`${token}: WETH unwrap failed: ${(e as Error).message.split("\n")[0]}`);
+        wAmt = 0n;
       }
     }
-
-    let tokTx: string | null = null;
-    let sentTok = 0n;
+    let tAmt = 0n;
     if (owedTok > 0n) {
-      try {
-        const tbal = await balanceOf(pc, token, me);
-        const amt = owedTok <= tbal ? owedTok : tbal;
-        if (amt > 0n) {
-          tokTx = await transfer(pc, wc, token, org.address, amt);
-          await pc.waitForTransactionReceipt({ hash: tokTx as `0x${string}` });
-          sentTok = amt;
-          db.recordTokenSend(token, org.address, amt, tokTx);
-          log.info(`${token}: sent ${amt} tokens → ${org.name} — tx ${tokTx}`);
-        }
-      } catch (e) {
-        // launch-window transfer restrictions can revert plain transfers — retry next cycle
-        log.warn(`${token}: token send skipped (${(e as Error).message.split("\n")[0]}) — will retry`);
-      }
+      const tbal = await balanceOf(pc, token, me).catch(() => 0n);
+      tAmt = owedTok <= tbal ? owedTok : tbal;
     }
+    if (wAmt <= 0n && tAmt <= 0n) return;
 
-    if (donatedWeth > 0n || sentTok > 0n) {
-      try {
-        const sym = await symOf(token);
-        const dec = Number((await pc.readContract({ address: token, abi: erc20Abi, functionName: "decimals" }).catch(() => 18)) as number);
-        log.info(`SUMMARY|charity|${token}|${sym}|${formatEther(donatedWeth)}|${sel}|${claimTx ?? ""}|${donateTx ?? ""}|${formatUnits(sentTok, dec)}|${tokTx ?? ""}`);
-      } catch { /* summary is best-effort */ }
+    // Per-org shares: floor by pct, the last org absorbs rounding dust.
+    let wUsed = 0n, tUsed = 0n;
+    for (let i = 0; i < alloc.length; i++) {
+      const a = alloc[i]!;
+      const org = CHARITIES[a.id]!;
+      const last = i === alloc.length - 1;
+      const wShare = last ? wAmt - wUsed : (wAmt * BigInt(a.pct)) / 100n;
+      const tShare = last ? tAmt - tUsed : (tAmt * BigInt(a.pct)) / 100n;
+      wUsed += wShare; tUsed += tShare;
+
+      let donateTx: string | null = null;
+      let donatedWeth = 0n;
+      if (wShare > 0n) {
+        try {
+          donateTx = await wc.sendTransaction({ account, chain: wc.chain, to: org.address, value: wShare });
+          await pc.waitForTransactionReceipt({ hash: donateTx as `0x${string}` });
+          donatedWeth = wShare;
+          db.recordDistribution(token, org.address, wShare, donateTx);
+          log.info(`${token}: donated ${eth(wShare)} (${a.pct}%) → ${org.name} — tx ${donateTx}`);
+        } catch (e) {
+          log.error(`${token}: donation to ${org.name} failed: ${(e as Error).message.split("\n")[0]}`);
+        }
+      }
+
+      let tokTx: string | null = null;
+      let sentTok = 0n;
+      if (tShare > 0n) {
+        try {
+          tokTx = await transfer(pc, wc, token, org.address, tShare);
+          await pc.waitForTransactionReceipt({ hash: tokTx as `0x${string}` });
+          sentTok = tShare;
+          db.recordTokenSend(token, org.address, tShare, tokTx);
+          log.info(`${token}: sent ${tShare} tokens (${a.pct}%) → ${org.name} — tx ${tokTx}`);
+        } catch (e) {
+          // launch-window transfer restrictions can revert plain transfers — retry next cycle
+          log.warn(`${token}: token send to ${org.name} skipped (${(e as Error).message.split("\n")[0]}) — will retry`);
+        }
+      }
+
+      if (donatedWeth > 0n || sentTok > 0n)
+        log.info(`SUMMARY|charity|${token}|${sym}|${formatEther(donatedWeth)}|${a.id}|${claimTx ?? ""}|${donateTx ?? ""}|${formatUnits(sentTok, dec)}|${tokTx ?? ""}`);
     }
   }
 }
