@@ -8,7 +8,7 @@ import {
   type PublicClient,
   type WalletClient,
 } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { privateKeyToAccount, nonceManager } from "viem/accounts";
 import {
   ROBINHOOD_CHAIN_ID,
   ROBINHOOD_EXPLORER,
@@ -45,7 +45,9 @@ export function makeClients(opts: {
   rpcFallbacks?: string[];
   privateKey: `0x${string}`;
 }): Clients {
-  const account = privateKeyToAccount(opts.privateKey);
+  // nonceManager serializes nonce allocation locally so rapid sequential sends in one
+  // cycle (fee skim → $FORK buyback → payouts) never collide on a stale nonce.
+  const account = privateKeyToAccount(opts.privateKey, { nonceManager });
 
   const envFallbacks = (process.env.RPC_FALLBACKS ?? "")
     .split(",")
