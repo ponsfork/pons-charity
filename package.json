@@ -1,0 +1,27 @@
+{
+  "name": "pons-charity",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Robinhood Chain / pons.family charity bot — claims creator fees and forwards 100% to the cause the dev picks",
+  "engines": {
+    "node": ">=20.10"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsx src/check.ts",
+    "charity": "tsx src/charity/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "viem": "^2.23.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.13.4",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}
