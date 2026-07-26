@@ -99,13 +99,17 @@ async function main() {
         let txt = "";
         try { txt = Buffer.from(t.input.slice(2), "hex").toString("utf8"); } catch { continue; }
         const m = txt.match(/^PONS\|([a-z]+)\|(0x[0-9a-fA-F]{40})$/);
-        if (!m || !CHARITIES[m[1]]) continue;
-        const token = getAddress(m[2]);
+        if (!m) continue;
+        const orgId = m[1] ?? "";
+        const tokenRaw = m[2] ?? "";
+        const org = CHARITIES[orgId];
+        if (!org || !tokenRaw) continue;
+        const token = getAddress(tokenRaw as Address);
         const dep = await deployerOf(token);
         if (!dep || dep !== t.from.toLowerCase()) { log.warn(`memo ignored: ${t.from} is not deployer of ${token}`); continue; }
         const prev = selections.get(token.toLowerCase());
-        selections.set(token.toLowerCase(), m[1]); // asc order → latest memo wins
-        if (prev !== m[1]) log.info(`cause set: ${token} → ${CHARITIES[m[1]]!.name} (by deployer ${t.from})`);
+        selections.set(token.toLowerCase(), orgId); // asc order → latest memo wins
+        if (prev !== orgId) log.info(`cause set: ${token} → ${org.name} (by deployer ${t.from})`);
       }
     } catch (e) {
       log.warn(`selection refresh failed: ${(e as Error).message.split("\n")[0]}`);
