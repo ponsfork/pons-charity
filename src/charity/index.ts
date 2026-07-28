@@ -34,11 +34,33 @@ const EXPLORER_API = "https://robinhoodchain.blockscout.com/api";
 
 /** Verified crypto-donation addresses (checked against each org's official page). */
 const CHARITIES: Record<string, { name: string; address: Address }> = {
-  stjude:   { name: "St. Jude Children's Research Hospital", address: "0x92EE2370b56DC32794A6CD72585dC01d4288D314" },
-  givewell: { name: "GiveWell",                               address: "0x4647c3b4c5ba4efa6d8197331de00c26ce36e8e6" },
-  eff:      { name: "Electronic Frontier Foundation",         address: "0x1ca9EB2a5C213d417269134b80111F57e1644105" },
-  fpf:      { name: "Freedom of the Press Foundation",        address: "0xC423F8aEDf1753Bc0ab58e455B0b5421CafE949e" },
-  // archive: Internet Archive — EXCLUDED until its ETH address is re-verified (conflicting sources).
+  stjude:         { name: "St. Jude Children's Research Hospital", address: "0x92EE2370b56DC32794A6CD72585dC01d4288D314" },
+  givewell:       { name: "GiveWell", address: "0x4647c3B4C5BA4EfA6D8197331de00c26Ce36E8E6" },
+  eff:            { name: "Electronic Frontier Foundation", address: "0x1ca9EB2a5C213d417269134b80111F57e1644105" },
+  fpf:            { name: "Freedom of the Press Foundation", address: "0xC423F8aEDf1753Bc0ab58e455B0b5421CafE949e" },
+  internetarchive:{ name: "Internet Archive", address: "0xFA8E3920daF271daB92Be9B87d9998DDd94FEF08" },
+  rainforest:     { name: "Rainforest Foundation US", address: "0xE422729513e2dB165D2f017CEa761FC555CF220A" },
+  kyds:           { name: "KYDS — Konscious Youth Development", address: "0x2a93f4A0A9108f38BD4A1d40a3171B34dD858Deb" },
+  lifespan:       { name: "Lifespan.io", address: "0x544F659fc1001134B7d9e938E5a0D8F62cFa1D31" },
+  grassroots:     { name: "Grassroots Economics", address: "0xba0FEE8490118FC4f46Bd0974D7BF93d0e2f1064" },
+  ecomoyo:        { name: "Eco Moyo Education Centre", address: "0x4aE3350BF2aE7135029F09E49e9C8A8d222Ac57a" },
+  littleangels:   { name: "Little Angels on Earth", address: "0x0B90755fcd5C3D24B34fB1aDb83323773BBbc014" },
+  scholastic:     { name: "Scholastic Materials for Vulnerable Children", address: "0x71Fff5ADCf4a5Ea13C56dEbd95e6c3C9079200Cd" },
+  schoolsupplies: { name: "Basic School Supplies & Crypto Education", address: "0x8270a0FEBBA70899419E76A98bF2B5DC15Fe2Ff4" },
+  whispers:       { name: "Whispers Children's Hospital & Maternity", address: "0xe7B9C112aC2EC9570521b69975613b6663593FFb" },
+  el3eza:         { name: "El3eza Centre", address: "0x01D47c2d932b08C72f5a387b4e6BbFCA84E6DA48" },
+  nisria:         { name: "Nisria", address: "0x2e4A661fC01391b07D6b6355A2357F1Eaf9D3B72" },
+  polyraiders:    { name: "Poly Raiders — Hope for Girls and Kids", address: "0xBec36282Ee89cb2Ad7E621917fC447bCAA68CE5a" },
+  trafficdoc:     { name: "Documentary on Nigerian Human Trafficking", address: "0xc517D11676cdBA59751CB2544d478de7E6C25a0c" },
+  landback:       { name: "The Land Back Foundation", address: "0x111F0577eC7e7580fE954Eda0a99034eB406F997" },
+  greenplanet:    { name: "Green Planet Ecosystem Conservation", address: "0x8efE51753dEfd7A1A82458731fbc05Fa04Cb2d1e" },
+  sacredmountain: { name: "Sacred Mountain Reforestation", address: "0x006FF5ee2fa4C182cC0d8F57eb8c42376D009a7a" },
+  adoptatree:     { name: "Adopt a Tree", address: "0x8be1CF753Db9A714063bc774fA39e5E2BC9B247D" },
+  climateuganda:  { name: "Climate Education & Regen Ag (Uganda)", address: "0x0d0c0941e2578da2b9E2Ad03619615f7EeBc48f7" },
+  cleanwave:      { name: "The Clean Wave", address: "0x2c0d9D0C822C14505034fDB9eFF0790E050b68BC" },
+  refiphangan:    { name: "ReFi Phangan", address: "0xa8258ED271BB9be9d7E16c5818E45eF6F2577d92" },
+  barichara:      { name: "Territorial Regeneration Barichara", address: "0xFd9F8A0f4bdEaC72F08AF1c708023cC31dD2E3BE" },
+  burundi:        { name: "Perfect Villages in Burundi", address: "0x1de498918d04B8Bf162210103CDd547f73387B2E" },
 };
 
 async function main() {
